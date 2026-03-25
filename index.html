@@ -400,6 +400,33 @@ function trimRow(row, key) {
   return out;
 }
 
+// ══════════════ SUPABASE CONFIG ══════════════
+const SUPA_URL = 'https://qxmihrzncyfcggsafzef.supabase.co';
+const SUPA_KEY = 'sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4';
+
+async function supaGet(key) {
+  try {
+    const r = await fetch(`${SUPA_URL}/rest/v1/taurus_data?key=eq.${encodeURIComponent(key)}&select=value`, {
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+    });
+    const data = await r.json();
+    return data && data[0] ? data[0].value : null;
+  } catch { return null; }
+}
+
+async function supaSet(key, value) {
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/taurus_data`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
+    });
+  } catch(e) { console.warn('supaSet error', key, e.message); }
+}
+
 // Compress data to base64 gzip using CompressionStream
 async function compress(obj) {
   const str = JSON.stringify(obj);
@@ -407,7 +434,6 @@ async function compress(obj) {
     const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
     const buf = await new Response(stream).arrayBuffer();
     const bytes = new Uint8Array(buf);
-    // Use chunked btoa to avoid stack overflow on large arrays
     let b64 = '';
     const chunk = 8192;
     for (let i = 0; i < bytes.length; i += chunk) {
@@ -415,7 +441,6 @@ async function compress(obj) {
     }
     return 'gz:' + btoa(b64);
   } catch(e) {
-    // Fallback: plain JSON (works on file:// protocol)
     return 'json:' + str;
   }
 }
@@ -453,18 +478,29 @@ async function decompress(stored) {
 async function saveDB(key) {
   try {
     const data = await compress(DB[key]);
-    localStorage.setItem('taurus_' + key, data);
-  } catch(e) {
-    console.warn('Could not persist', key, e.message);
-  }
+    localStorage.setItem('taurus_' + key, data); // local cache
+    supaSet('taurus_' + key, data);              // cloud sync
+  } catch(e) { console.warn('saveDB error', key, e.message); }
 }
 
 async function loadStorage() {
+  showToast('⏳ Cargando datos...');
+
+  // Helper: get from Supabase, fallback to localStorage
+  async function getVal(supaKey, localKey) {
+    const cloud = await supaGet(supaKey);
+    if (cloud) {
+      localStorage.setItem(localKey, cloud); // update local cache
+      return cloud;
+    }
+    return localStorage.getItem(localKey);
+  }
+
   for (const cat of CATS) {
     for (const base of FILE_KEYS) {
       const key = cat+'_'+base;
       try {
-        const raw = localStorage.getItem('taurus_' + key);
+        const raw = await getVal('taurus_'+key, 'taurus_'+key);
         if (raw) {
           try { DB[key] = await decompress(raw); }
           catch { DB[key] = JSON.parse(raw) || {}; }
@@ -472,24 +508,56 @@ async function loadStorage() {
       } catch { DB[key] = {}; }
     }
   }
-  try { METAS    = JSON.parse(localStorage.getItem('taurus_metas'))    || {}; } catch { METAS = {}; }
-  try { PLAN_DIV = JSON.parse(localStorage.getItem('taurus_planDiv'))  || {}; } catch { PLAN_DIV = {}; }
-  try { PLAN_VEND= JSON.parse(localStorage.getItem('taurus_planVend')) || {}; } catch { PLAN_VEND= {}; }
+
   try {
-    const raw = JSON.parse(localStorage.getItem('taurus_hist_seco'));
-    if (raw && raw.byDiv) DB2025.seco = raw;
-    else if (raw) DB2025.seco = { byDiv: raw, byVend: {} }; // legacy
+    const v = await getVal('taurus_metas', 'taurus_metas');
+    METAS = JSON.parse(v) || {};
+  } catch { METAS = {}; }
+
+  try {
+    const v = await getVal('taurus_planDiv', 'taurus_planDiv');
+    PLAN_DIV = JSON.parse(v) || {};
+  } catch { PLAN_DIV = {}; }
+
+  try {
+    const v = await getVal('taurus_planVend', 'taurus_planVend');
+    PLAN_VEND = JSON.parse(v) || {};
+  } catch { PLAN_VEND = {}; }
+
+  try {
+    const raw = await getVal('taurus_hist_seco', 'taurus_hist_seco');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.byDiv) DB2025.seco = parsed;
+    else if (parsed) DB2025.seco = { byDiv: parsed, byVend: {} };
   } catch { DB2025.seco = null; }
+
   try {
-    const raw = JSON.parse(localStorage.getItem('taurus_hist_cong'));
-    if (raw && raw.byDiv) DB2025.cong = raw;
-    else if (raw) DB2025.cong = { byDiv: raw, byVend: {} }; // legacy
+    const raw = await getVal('taurus_hist_cong', 'taurus_hist_cong');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.byDiv) DB2025.cong = parsed;
+    else if (parsed) DB2025.cong = { byDiv: parsed, byVend: {} };
   } catch { DB2025.cong = null; }
+
+  showToast('✅ Datos cargados');
 }
 
-function saveMetas()   { localStorage.setItem('taurus_metas',   JSON.stringify(METAS)); }
-function savePlanDiv() { localStorage.setItem('taurus_planDiv', JSON.stringify(PLAN_DIV)); }
-function savePlanVend(){ try { localStorage.setItem('taurus_planVend', JSON.stringify(PLAN_VEND)); } catch(_){} }
+function saveMetas()   {
+  const v = JSON.stringify(METAS);
+  localStorage.setItem('taurus_metas', v);
+  supaSet('taurus_metas', v);
+}
+function savePlanDiv() {
+  const v = JSON.stringify(PLAN_DIV);
+  localStorage.setItem('taurus_planDiv', v);
+  supaSet('taurus_planDiv', v);
+}
+function savePlanVend(){
+  try {
+    const v = JSON.stringify(PLAN_VEND);
+    localStorage.setItem('taurus_planVend', v);
+    supaSet('taurus_planVend', v);
+  } catch(_) {}
+}
 
 // ══════════════ LOGIN ══════════════
 function doLogin() {
@@ -587,7 +655,9 @@ function handleHist(input, cat) {
       }
 
       DB2025[cat] = { byDiv, byVend };
-      try { localStorage.setItem('taurus_hist_'+cat, JSON.stringify(DB2025[cat])); } catch(_) {}
+      const histJson = JSON.stringify(DB2025[cat]);
+      try { localStorage.setItem('taurus_hist_'+cat, histJson); } catch(_) {}
+      supaSet('taurus_hist_'+cat, histJson);
 
       const meses = Object.keys(byDiv).sort();
       document.getElementById('us-'+cat+'_hist').innerHTML = '<span class="s-loaded">✓ Cargado</span>';
@@ -1112,10 +1182,18 @@ function difCellPct(actual, meta) {
 }
 
 async function limpiarTodo() {
-  if (!confirm('¿Limpiar todos los datos cargados?\nEsto elimina Seco + Congelados, meses, metas y planes.')) return;
+  if (!confirm('¿Limpiar todos los datos cargados?\nEsto elimina Seco + Congelados, meses, metas y planes.\nSe borrará también de la nube.')) return;
+  // Clear localStorage
   Object.keys(localStorage)
     .filter(k => k.startsWith('taurus_') && k !== 'taurus_session')
     .forEach(k => localStorage.removeItem(k));
+  // Clear Supabase
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/taurus_data`, {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+    });
+  } catch(_) {}
   showToast('🗑 Datos eliminados — recargando...');
   setTimeout(() => location.reload(), 800);
 }
