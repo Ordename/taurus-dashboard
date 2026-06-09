@@ -126,6 +126,10 @@ tr:hover td{background:rgba(0,0,0,.015)}
 .r-bono{background:#FAFAFA}.r-bruto{background:#FFFCF0}.r-trans{background:#F5F0FF}
 .r-remu{background:#F0F7FF}.r-dir{background:#E0F6EA}
 
+/* Separador visual entre bloques de meses */
+.col-msep{border-left:3px solid #8A8F98}
+.col-tot{border-left:3px solid #111}
+
 /* META DISPLAY */
 .meta-display{display:inline-block;min-width:90px;padding:2px 4px;border:none;border-bottom:1px dashed #CCC;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;cursor:pointer;text-align:right;background:transparent;transition:border .15s;color:var(--text)}
 .meta-display:hover{border-bottom-color:var(--red);color:var(--red)}
@@ -1571,13 +1575,13 @@ function renderDashboard(filtered, totalRows) {
   // 4 cols per month + Total Acumulado when >1 month
   const showTotal = months.length > 1;
   const monthHeaders = months.map(m =>
-    `<th colspan="4" style="background:#444;text-align:center;font-weight:600">${formatMonth(m)}</th>`
-  ).join('') + (showTotal ? `<th colspan="4" style="background:#8B0012;text-align:center;font-weight:600">Total Acumulado</th>` : '')
+    `<th colspan="4" class="col-msep" style="background:#444;text-align:center;font-weight:600">${formatMonth(m)}</th>`
+  ).join('') + (showTotal ? `<th colspan="4" class="col-tot" style="background:#8B0012;text-align:center;font-weight:600">Total Acumulado</th>` : '')
   || `<th class="sub">Meta</th><th class="sub">Monto</th><th class="sub">Dif. $</th><th class="sub">Dif. %</th>`;
 
   const monthSubHeaders = months.length > 0
-    ? months.map(() => `<th class="sub">Real</th><th class="sub">Meta</th><th class="sub">Var $</th><th class="sub">Var %</th>`).join('')
-      + (showTotal ? `<th class="sub" style="background:#D9001E">Real</th><th class="sub" style="background:#D9001E">Meta</th><th class="sub" style="background:#D9001E">Var $</th><th class="sub" style="background:#D9001E">Var %</th>` : '')
+    ? months.map(() => `<th class="sub col-msep">Real</th><th class="sub">Meta</th><th class="sub">Var $</th><th class="sub">Var %</th>`).join('')
+      + (showTotal ? `<th class="sub col-tot" style="background:#D9001E">Real</th><th class="sub" style="background:#D9001E">Meta</th><th class="sub" style="background:#D9001E">Var $</th><th class="sub" style="background:#D9001E">Var %</th>` : '')
     : '';
 
   const html = `<table>
@@ -1600,7 +1604,7 @@ function renderDashboard(filtered, totalRows) {
           const dp = d != null && monthMeta ? d/Math.abs(monthMeta) : null;
           const cls = d!=null?(d>=0?'pos':'neg'):'';
           const dDisp = d!=null ? (d>=0?'+':'')+(r.isPct?pct(d):pesos(d)) : '—';
-          return `<td class="${r.isPct?'pct':'num'}">${valDisp}</td>
+          return `<td class="${r.isPct?'pct':'num'} col-msep">${valDisp}</td>
                   <td class="num" style="${metaStyle}">${metaDisp(monthMeta)}</td>
                   <td class="${r.isPct?'pct':'num'} ${cls}">${dDisp}</td>
                   <td class="pct ${cls}">${dp!=null?(dp>=0?'+':'')+pct(dp):'—'}</td>`;
@@ -1612,7 +1616,7 @@ function renderDashboard(filtered, totalRows) {
           const dp = d != null && totalMeta ? d/Math.abs(totalMeta) : null;
           const cls = d!=null?(d>=0?'pos':'neg'):'';
           const totalReal = r.isPct ? pct(r.val) : pesos(r.val);
-          return `<td class="num" style="font-weight:600">${totalReal}</td>
+          return `<td class="num col-tot" style="font-weight:600">${totalReal}</td>
                   <td class="num" style="${metaStyle}">${metaDisp(totalMeta)}</td>
                   <td class="num ${cls}">${d!=null?(d>=0?'+':'')+pesos(d):'—'}</td>
                   <td class="pct ${cls}">${dp!=null?(dp>=0?'+':'')+pct(dp):'—'}</td>`;
@@ -1652,36 +1656,36 @@ function renderDashboard(filtered, totalRows) {
   const totTkt = totTrx > 0 ? totalVenta/totTrx*1000 : 0;
   const totCobCls = metaCob ? (totCob>=metaCob?'pos':'neg') : '';
 
-  const indMonthHeaders = months.map(m => `<th style="background:#444;text-align:center">${formatMonth(m)}</th>`).join('');
+  const indMonthHeaders = months.map(m => `<th class="col-msep" style="background:#444;text-align:center">${formatMonth(m)}</th>`).join('');
   const showIndTotal = months.length > 1;
 
   const indHtml = `<table>
     <thead><tr>
       <th style="width:200px;text-align:left">Indicador</th>
       ${indMonthHeaders}
-      ${showIndTotal ? '<th style="background:#8B0012;text-align:center">Total</th>' : ''}
+      ${showIndTotal ? '<th class="col-tot" style="background:#8B0012;text-align:center">Total</th>' : ''}
       <th style="background:#333;text-align:center">Meta</th>
       <th style="background:#333;text-align:center">% Cumpl.</th>
     </tr></thead>
     <tbody>
       <tr style="background:#FAF5FF">
         <td style="font-weight:600">🏢 Cobertura <span style="font-size:10px;color:#999;font-weight:400">clientes únicos</span></td>
-        ${indRows.map(({cob,cobMeta,cobCls})=>`<td class="num ${cobCls}">${cob.toLocaleString('es-CL')}</td>`).join('')}
-        ${showIndTotal?`<td class="num ${totCobCls}" style="font-weight:700">${totCob.toLocaleString('es-CL')}</td>`:''}
+        ${indRows.map(({cob,cobMeta,cobCls})=>`<td class="num col-msep ${cobCls}">${cob.toLocaleString('es-CL')}</td>`).join('')}
+        ${showIndTotal?`<td class="num col-tot ${totCobCls}" style="font-weight:700">${totCob.toLocaleString('es-CL')}</td>`:''}
         <td class="num" style="color:#888">${metaCob!=null?Math.round(metaCob).toLocaleString('es-CL'):'—'}</td>
         <td class="pct ${totCobCls}">${metaCob&&metaCob>0?(totCob/metaCob*100).toFixed(1)+'%':'—'}</td>
       </tr>
       <tr style="background:#EBF5FB">
         <td style="font-weight:600">📄 Transacciones <span style="font-size:10px;color:#999;font-weight:400">folios únicos</span></td>
-        ${indRows.map(({trx})=>`<td class="num">${trx.toLocaleString('es-CL')}</td>`).join('')}
-        ${showIndTotal?`<td class="num" style="font-weight:700">${totTrx.toLocaleString('es-CL')}</td>`:''}
+        ${indRows.map(({trx})=>`<td class="num col-msep">${trx.toLocaleString('es-CL')}</td>`).join('')}
+        ${showIndTotal?`<td class="num col-tot" style="font-weight:700">${totTrx.toLocaleString('es-CL')}</td>`:''}
         <td class="num" style="color:#888">—</td>
         <td class="pct">—</td>
       </tr>
       <tr style="background:#E9F7EF">
         <td style="font-weight:600">💳 Ticket Promedio <span style="font-size:10px;color:#999;font-weight:400">venta ÷ transacciones</span></td>
-        ${indRows.map(({tkt})=>`<td class="num">${pesos(tkt)}</td>`).join('')}
-        ${showIndTotal?`<td class="num" style="font-weight:700">${pesos(totTkt)}</td>`:''}
+        ${indRows.map(({tkt})=>`<td class="num col-msep">${pesos(tkt)}</td>`).join('')}
+        ${showIndTotal?`<td class="num col-tot" style="font-weight:700">${pesos(totTkt)}</td>`:''}
         <td class="num" style="color:#888">—</td>
         <td class="pct">—</td>
       </tr>
@@ -1822,26 +1826,29 @@ function renderDivision(filtered) {
   // Month block headers: AA 2025 | Meta 2026 | Real 2026 | %vs2025 | %vsMeta
   const colsPerMonth = hasAA ? 5 : 3; // AA | Meta | Real | %Crec | %Cumpl  (or Meta | Real | %Cumpl)
   const moHeaders = months.map(mo =>
-    `<th colspan="${colsPerMonth}" style="background:#444;text-align:center">${formatMonth(mo)}</th>`
-  ).join('') + (showTotal ? `<th colspan="${colsPerMonth}" style="background:#8B0012;text-align:center">Total Acumulado</th>` : '');
+    `<th colspan="${colsPerMonth}" class="col-msep" style="background:#444;text-align:center">${formatMonth(mo)}</th>`
+  ).join('') + (showTotal ? `<th colspan="${colsPerMonth}" class="col-tot" style="background:#8B0012;text-align:center">Total Acumulado</th>` : '');
 
   const subStyle = 'style="background:#D9001E"';
   const moSubHeaders = months.map(() =>
-    (hasAA ? `<th class="sub">AA 2025</th>` : '')
-    + `<th class="sub">Meta 2026</th><th class="sub">Real 2026</th>`
+    (hasAA ? `<th class="sub col-msep">AA 2025</th>` : `<th class="sub col-msep">Meta 2026</th>`)
+    + (hasAA ? `<th class="sub">Meta 2026</th>` : '')
+    + `<th class="sub">Real 2026</th>`
     + (hasAA ? `<th class="sub">% vs 2025</th>` : '')
     + `<th class="sub">% vs Meta</th>`
   ).join('') + (showTotal ?
-    (hasAA ? `<th class="sub" ${subStyle}>AA 2025</th>` : '')
-    + `<th class="sub" ${subStyle}>Meta 2026</th><th class="sub" ${subStyle}>Real 2026</th>`
+    (hasAA ? `<th class="sub col-tot" ${subStyle}>AA 2025</th>` : `<th class="sub col-tot" ${subStyle}>Meta 2026</th>`)
+    + (hasAA ? `<th class="sub" ${subStyle}>Meta 2026</th>` : '')
+    + `<th class="sub" ${subStyle}>Real 2026</th>`
     + (hasAA ? `<th class="sub" ${subStyle}>% vs 2025</th>` : '')
     + `<th class="sub" ${subStyle}>% vs Meta</th>`
   : '');
 
   // Build a single month's cells: AA | Meta | Real | %Crec | %Cumpl
-  const moCell = (real, planV, aa) => {
-    const aaCell = hasAA ? `<td class="num" style="color:#888">${aa!=null?pesos(aa):'—'}</td>` : '';
-    const metaCell = planV!=null ? `<td class="num" style="color:#888">${pesos(planV)}</td>` : '<td class="num" style="color:#BBB">—</td>';
+  // sep = clase de separador en la primera celda del bloque ('col-msep' mes, 'col-tot' total)
+  const moCell = (real, planV, aa, sep='col-msep') => {
+    const aaCell = hasAA ? `<td class="num ${sep}" style="color:#888">${aa!=null?pesos(aa):'—'}</td>` : '';
+    const metaCell = planV!=null ? `<td class="num${hasAA?'':' '+sep}" style="color:#888">${pesos(planV)}</td>` : `<td class="num${hasAA?'':' '+sep}" style="color:#BBB">—</td>`;
     const realCell = numCell(real);
     const crecC = hasAA ? crecCell(real, aa) : '';
     const cumplC = cumplCell(real, planV);
@@ -1855,7 +1862,7 @@ function renderDivision(filtered) {
     const totPlan = getPlanDivFiltered(div, months);
     const totAaVals = months.map(mo=>getAA(cat,div,mo.slice(5,7)));
     const totAA = totAaVals.some(v=>v!=null) ? totAaVals.reduce((s,v)=>s+(v||0),0) : null;
-    const totalCells = showTotal ? moCell(totReal, totPlan, totAA) : '';
+    const totalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
     return `<tr>
       <td style="${indent?'padding-left:20px':''}font-weight:600;color:var(--red)">${div}</td>
       ${months.map(mo=>{
@@ -1880,7 +1887,7 @@ function renderDivision(filtered) {
     const totPlan = entries.reduce((s,[div])=>s+(getPlanDivFiltered(div,months)||0),0)||null;
     const totAaVals = months.map(mo=>entries.map(([div,d])=>getAA(d.cat,div,mo.slice(5,7))));
     const totAA = totAaVals.flat().some(v=>v!=null) ? totAaVals.flat().reduce((s,v)=>s+(v||0),0) : null;
-    const totalCells = showTotal ? moCell(totReal, totPlan, totAA) : '';
+    const totalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
     return `<tr style="background:#1A0005;color:#FFF;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
       <td style="letter-spacing:.04em">${label}</td>
       ${moCells}${totalCells}
@@ -1901,7 +1908,7 @@ function renderDivision(filtered) {
   const totPlan = allEntries.reduce((s,[div])=>s+(getPlanDivFiltered(div,months)||0),0)||null;
   const totAaVals = months.flatMap(mo=>allEntries.map(([div,d])=>getAA(d.cat,div,mo.slice(5,7))));
   const totAA = totAaVals.some(v=>v!=null) ? totAaVals.reduce((s,v)=>s+(v||0),0) : null;
-  const grandTotalCells = showTotal ? moCell(totReal, totPlan, totAA) : '';
+  const grandTotalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
 
   const totalCols = months.length * colsPerMonth + (showTotal ? colsPerMonth : 0) + 1;
 
