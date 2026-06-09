@@ -692,6 +692,20 @@ function handleHist(input, cat) {
   };
   reader.readAsArrayBuffer(file);
 }
+// Elimina filas idénticas dentro de una clave (entre todos los meses), conservando
+// la primera aparición. Así re-subir el mismo archivo o archivos que se solapan
+// (p. ej. ventas con facturas repetidas entre meses) no infla los totales.
+function dedupKey(key) {
+  const seen = new Set();
+  Object.keys(DB[key] || {}).forEach(m => {
+    DB[key][m] = (DB[key][m] || []).filter(row => {
+      const s = JSON.stringify(row);
+      if (seen.has(s)) return false;
+      seen.add(s); return true;
+    });
+  });
+}
+
 function handleFile(input, key) {
   const file = input.files[0];
   if (!file) return;
@@ -743,6 +757,7 @@ function handleFile(input, key) {
       const month = detectMonth(json, key);
       if (!DB[key]) DB[key] = {};
       DB[key][month] = json;
+      dedupKey(key); // evita duplicados si se re-sube un archivo o archivos que se solapan
 
       // Save to localStorage in background — don't block UI
       setTimeout(() => saveDB(key), 0);
@@ -1496,6 +1511,44 @@ function renderDashboard(filtered, totalRows) {
   const metaDir     = metaBruto != null ? metaBruto - metaTrans - metaRemV - metaRemS : null;
   const metaPctDir  = metaDir != null && metaVenta ? metaDir / metaVenta : null;
 
+  // ── Valores REALES por mes (antes se repartía el total /N, dando el mismo
+  //    número en cada mes). Se calcula cada mes con sus propias filas. ──
+  const deriveVals = (v,c,p,b,t,rv,rs) => {
+    const mg=v-c, m2=mg+p, br=m2+b, dir=br-t-rv-rs;
+    return {venta_total:v, costo_venta:c, margen:mg, prot:p, margen2:m2, pct_margen2:v?m2/v:0,
+            bonos:b, pct_bono:v?b/v:0, m_bruto:br, pct_bruto:v?br/v:0,
+            c_trans:t, pct_trans:v?t/v:0, remu_v:rv, remu_s:rs, m_dir:dir, pct_dir:v?dir/v:0};
+  };
+  const deriveMetas = (v,c,p,b,t,rv,rs) => {
+    const mg=(v!=null&&c!=null)?v-c:null, m2=mg!=null?mg+(p||0):null, br=m2!=null?m2+(b||0):null,
+          dir=br!=null?br-(t||0)-(rv||0)-(rs||0):null;
+    return {venta_total:v, costo_venta:c, margen:mg, prot:p, margen2:m2, pct_margen2:(m2!=null&&v)?m2/v:null,
+            bonos:b, pct_bono:(b!=null&&v)?b/v:null, m_bruto:br, pct_bruto:(br!=null&&v)?br/v:null,
+            c_trans:t, pct_trans:(t!=null&&v)?t/v:null, remu_v:rv, remu_s:rs, m_dir:dir, pct_dir:(dir!=null&&v)?dir/v:null};
+  };
+  // Meta de un mes puntual SIN caer al total heredado (si el mes no tiene plan → null → "—")
+  const monthMetaRaw = (key, m) => {
+    const cats = activeCat==='both'?['seco','cong']:[activeCat];
+    let tot=0, found=false;
+    cats.forEach(c=>{ const v=METAS[c+'_'+m+'_'+key]; if(v!=null){tot+=v;found=true;} });
+    return found?tot:null;
+  };
+  const valsByMonth={}, metasByMonth={};
+  months.forEach(m => {
+    const mRows = filtered.filter(row => rowMonth(row) === m);
+    valsByMonth[m] = deriveVals(
+      sumC(mRows,'VTAAPRECIO'), sumC(mRows,'VTAACOSTO'),
+      sumFile('prot',mRows), sumFile('bonos',mRows), sumFile('trans',mRows),
+      sumFile('remv',mRows), sumFile('rems',mRows));
+    const mVenta = monthMetaRaw('meta_venta_total', m);
+    metasByMonth[m] = (mVenta==null)
+      ? deriveMetas(null,null,null,null,null,null,null)
+      : deriveMetas(mVenta, monthMetaRaw('meta_costo_venta',m),
+          monthMetaRaw('meta_prot',m)||0, monthMetaRaw('meta_bonos',m)||0,
+          monthMetaRaw('meta_c_trans',m)||0, monthMetaRaw('meta_remu_v',m)||0,
+          monthMetaRaw('meta_remu_s',m)||0);
+  });
+
   const ROWS = [
     { key:'venta_total', label:'💰 Venta Total',              val:totalVenta,  cls:'r-venta', isPct:false, editable:true,  planVal:metaVenta,   mKey:'VTAAPRECIO' },
     { key:'costo_venta', label:'📦 Costo de Ventas',          val:totalCosto,  cls:'r-costo', isPct:false, editable:true,  planVal:metaCosto,   mKey:'VTAACOSTO' },
@@ -1540,37 +1593,16 @@ function renderDashboard(filtered, totalRows) {
 
       if (months.length > 0) {
         const monthCells = months.map(m => {
-          const monthMeta = mn != null ? mn / months.length : null;
-          const mRows = filtered.filter(row => rowMonth(row) === m);
-          const mV = sumC(mRows,'VTAAPRECIO');
-          const mC = sumC(mRows,'VTAACOSTO');
-
-          let mv;
-          if (r.mKey === 'VTAAPRECIO') mv = mV;
-          else if (r.mKey === 'VTAACOSTO') mv = mC;
-          else if (r.key==='margen')       mv = mV - mC;
-          else if (r.key==='margen2')      mv = (mV-mC) + protTotal/months.length;
-          else if (r.key==='pct_margen2')  mv = mV ? ((mV-mC)+protTotal/months.length)/mV : 0;
-          else if (r.key==='bonos')        mv = bonoTotal/months.length;
-          else if (r.key==='pct_bono')     mv = mV ? (bonoTotal/months.length)/mV : 0;
-          else if (r.key==='m_bruto')      mv = (mV-mC)+protTotal/months.length+bonoTotal/months.length;
-          else if (r.key==='pct_bruto')    { const mb=(mV-mC)+protTotal/months.length+bonoTotal/months.length; mv=mV?mb/mV:0; }
-          else if (r.key==='c_trans')      mv = transTotal/months.length;
-          else if (r.key==='pct_trans')    mv = mV ? (transTotal/months.length)/mV : 0;
-          else if (r.key==='remu_v')       mv = remvTotal/months.length;
-          else if (r.key==='remu_s')       mv = remsTotal/months.length;
-          else if (r.key==='prot')         mv = protTotal/months.length;
-          else if (r.key==='m_dir')        { const mb2=(mV-mC)+protTotal/months.length+bonoTotal/months.length; mv=mb2-transTotal/months.length-remvTotal/months.length-remsTotal/months.length; }
-          else if (r.key==='pct_dir')      { const mb3=(mV-mC)+protTotal/months.length+bonoTotal/months.length; const md=mb3-transTotal/months.length-remvTotal/months.length-remsTotal/months.length; mv=mV?md/mV:0; }
-          else mv = 0;
-
+          const mv = valsByMonth[m][r.key];
+          const monthMeta = metasByMonth[m][r.key];
           const valDisp = r.isPct ? pct(mv) : pesos(mv);
           const d = monthMeta != null ? mv - monthMeta : null;
           const dp = d != null && monthMeta ? d/Math.abs(monthMeta) : null;
           const cls = d!=null?(d>=0?'pos':'neg'):'';
-          return `<td class="num">${valDisp}</td>
+          const dDisp = d!=null ? (d>=0?'+':'')+(r.isPct?pct(d):pesos(d)) : '—';
+          return `<td class="${r.isPct?'pct':'num'}">${valDisp}</td>
                   <td class="num" style="${metaStyle}">${metaDisp(monthMeta)}</td>
-                  <td class="num ${cls}">${d!=null?(d>=0?'+':'')+pesos(d):'—'}</td>
+                  <td class="${r.isPct?'pct':'num'} ${cls}">${dDisp}</td>
                   <td class="pct ${cls}">${dp!=null?(dp>=0?'+':'')+pct(dp):'—'}</td>`;
         }).join('');
         // Total acumulado column

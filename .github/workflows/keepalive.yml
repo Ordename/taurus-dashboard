@@ -1,0 +1,21 @@
+name: Supabase keepalive
+
+# Mantiene "despierto" el proyecto gratuito de Supabase (se pausa tras ~7 días
+# de inactividad). Hace una consulta mínima cada 3 días desde la nube de GitHub.
+on:
+  schedule:
+    - cron: '0 12 */3 * *'   # cada 3 días, 12:00 UTC
+  workflow_dispatch:          # permite ejecutarlo a mano desde la pestaña Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://qxmihrzncyfcggsafzef.supabase.co/rest/v1/taurus_data?select=key&limit=1" \
+            -H "apikey: sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4" \
+            -H "Authorization: Bearer sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4")
+          echo "HTTP $code"
+          test "$code" = "200"
