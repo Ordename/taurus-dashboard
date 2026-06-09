@@ -267,6 +267,7 @@ tr:hover td{background:rgba(0,0,0,.015)}
           <button class="z-pill" onclick="setZona('SUR 1',this)" style="text-align:left">Sur 1</button>
           <button class="z-pill" onclick="setZona('SUR 2',this)" style="text-align:left">Sur 2</button>
           <button class="z-pill" onclick="setZona('GC',this)" style="text-align:left">GC</button>
+          <button class="z-pill" onclick="setZona('MAYORISTAS',this)" style="text-align:left">Mayoristas</button>
         </div>
       </div>
       <div class="filter-group"><label>División</label><div class="filter-list"><select id="fl-div" multiple onchange="applyFilters()"><option value="todas" selected>Todas</option></select></div></div>
@@ -361,7 +362,8 @@ const ZONA_MAP = {
   'NORTE': ['T02','T04','T05','T06','T11','T12','T13','T16','T19','V03','V06','V07'],
   'SUR 1': ['T03','T07','T08','T09','T10','T15','T22','T01','T14','T17','T18'],
   'SUR 2': ['T23','T24','T25','T26','T27','V01','V02','V04','V05'],
-  'GC':    ['T20','T21']
+  'GC':    ['T21','T28'],
+  'MAYORISTAS': ['T29']
 };
 // Reverse map: vendedor -> zona
 const VEND_ZONA = {};
@@ -380,7 +382,7 @@ const TRIMESTRE_MESES = {
 
 const KEEP_COLS = {
   ventas: ['TIPO','NUM_DOC','ENTIDAD','SUENDO','EMISION','VENDEDOR','VTAAPRECIO','VTAACOSTO','NOKOPF','NOKOFM','NOKOHF','MARCA','DIVISIÓN','Division','DIVISION'],
-  prot:   ['Tipo_Doc','Documento','Fecha_Documento','Cod_Vend','Division','Categoria','NETO','DIVISION'],
+  prot:   ['Tipo_Doc','Documento','Fecha_Venta','Fecha_Documento','Cod_Vend','VENDEDOR','Division','Categoria','NETO','DIVISION'],
   bonos:  ['Codigo Vendedor','Mes','Monto'],
   trans:  ['Codigo Vendedor','Mes','Monto'],
   remv:   ['Codigo Vendedor','Mes','Monto'],
@@ -395,8 +397,14 @@ function trimRow(row, key) {
   const out = {};
   keep.forEach(k => {
     if (!(k in row)) return;
-    if (base === 'ventas' && (k === 'VTAAPRECIO' || k === 'VTAACOSTO')) {
+    if (base === 'ventas' && k === 'VTAAPRECIO') {
       out[k] = n(row[k]) / 1000;
+    } else if (base === 'ventas' && k === 'VTAACOSTO') {
+      // El signo del costo no es consistente entre archivos (Seco lo trae negativo,
+      // Congelados positivo). Lo normalizamos al mismo signo del precio para que
+      // 'margen = venta - costo' funcione siempre (incl. notas de crédito).
+      const price = n(row['VTAAPRECIO']);
+      out[k] = (price < 0 ? -Math.abs(n(row[k])) : Math.abs(n(row[k]))) / 1000;
     } else if (base === 'prot' && k === 'NETO') {
       out[k] = n(row[k]) / 1000;
     } else if (k === 'EMISION' || k === 'Fecha_Documento' || k === 'Fecha_Venta') {
@@ -426,11 +434,11 @@ async function supaGet(key) {
 
 async function supaSet(key, value) {
   try {
-    await fetch(`${SUPA_URL}/rest/v1/taurus_data`, {
+    await fetch(`${SUPA_URL}/rest/v1/taurus_data?on_conflict=key`, {
       method: 'POST',
       headers: {
         'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
+        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
       body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
     });
@@ -500,7 +508,7 @@ async function loadStorage() {
   async function getVal(supaKey, localKey) {
     const cloud = await supaGet(supaKey);
     if (cloud) {
-      localStorage.setItem(localKey, cloud); // update local cache
+      try { localStorage.setItem(localKey, cloud); } catch(_) {} // cache local; no romper si excede cuota
       return cloud;
     }
     return localStorage.getItem(localKey);
@@ -1096,10 +1104,10 @@ function rowMonth(r) {
 function rowDiv(r) {
   const vend = String(r['VENDEDOR'] || '');
   const isCong = vend.startsWith('V'); // V* = Congelados, T* = Seco
-  const d = r['DIVISIÓN'] || r['Division'] || r['DIVISION'];
-  const nokopf = r['NOKOPF'] || '';
-  if (isCong) return { div: d || nokopf || 'Sin División', cat: 'cong' };
-  return { div: nokopf || 'Sin División', cat: 'seco' };
+  // La división viene en la columna DIVISION (el export nuevo ya no trae NOKOPF,
+  // que queda solo como respaldo para datos antiguos).
+  const d = r['DIVISION'] || r['DIVISIÓN'] || r['Division'] || r['NOKOPF'] || '';
+  return { div: d || 'Sin División', cat: isCong ? 'cong' : 'seco' };
 }
 
 // ══════════════ HELPERS ══════════════
@@ -1110,7 +1118,7 @@ const sumC  = (rows,col) => rows.reduce((s,r)=>s+n(r[col]),0);
 function findCol(cols,pats){ for(const p of pats){const f=cols.find(c=>new RegExp(p,'i').test(c));if(f)return f;} return null; }
 // Column mapping per file type
 const FILE_COLS = {
-  prot:  { val:'NETO',      date:'Fecha_Documento', vend:'Cod_Vend',  div:'Division',  fam:'Categoria',   doc:'Documento',  tipo:'Tipo_Doc',   tipoFCV:['FC','FCV'] },
+  prot:  { val:'NETO',      date:'Fecha_Venta',     vend:'Cod_Vend',  div:'Division',  fam:'Categoria',   doc:'Documento',  tipo:'Tipo_Doc',   tipoFCV:['FC','FCV'] },
   bonos: { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes' },
   trans: { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
   remv:  { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
@@ -1145,7 +1153,7 @@ function sumFile(base, filteredVentas) {
   const dateCol = cfg?.date;
 
   const filtered = rows.filter(r => {
-    const rv = r[vendCol] ? String(r[vendCol]).trim() : '';
+    const rv = String(r[vendCol] || r['VENDEDOR'] || '').trim();
 
     // Category filter by vendor prefix
     if (catVendPrefixes && rv) {
