@@ -1,0 +1,6 @@
+
+# Archivos de datos del cliente (NO subir al repo público)
+datos/
+*.xlsx
+*.xls
+*.csv
