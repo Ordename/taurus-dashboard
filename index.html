@@ -130,6 +130,12 @@ tr:hover td{background:rgba(0,0,0,.015)}
 .col-msep{border-left:2px solid #D5D8DC}
 .col-tot{border-left:2px solid #C0001A}
 
+/* Modo SOLO LECTURA: oculta carga/limpieza y desactiva edición de metas */
+body.readonly #card-carga{display:none}
+body.readonly #grp-limpiar{display:none}
+body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;cursor:default;border-bottom:none}
+.ro-badge{font-size:10px;font-weight:700;color:#0A7A4A;background:#EBF8F2;border:1px solid #0A7A4A;border-radius:10px;padding:1px 7px;letter-spacing:.04em;margin-left:6px}
+
 /* META DISPLAY */
 .meta-display{display:inline-block;min-width:90px;padding:2px 4px;border:none;border-bottom:1px dashed #CCC;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;cursor:pointer;text-align:right;background:transparent;transition:border .15s;color:var(--text)}
 .meta-display:hover{border-bottom-color:var(--red);color:var(--red)}
@@ -204,8 +210,8 @@ tr:hover td{background:rgba(0,0,0,.015)}
   </div>
   <div style="display:flex;gap:14px;align-items:center">
     <span>👤 <span id="tb-user"></span></span>
-    <span class="dot">·</span>
-    <a onclick="limpiarTodo()">🗑 LIMPIAR DATOS</a>
+    <span id="grp-limpiar"><span class="dot">·</span>
+    <a onclick="limpiarTodo()">🗑 LIMPIAR DATOS</a></span>
     <span class="dot">·</span>
     <a onclick="doLogout()">🔒 CERRAR SESIÓN</a>
   </div>
@@ -229,7 +235,7 @@ tr:hover td{background:rgba(0,0,0,.015)}
 <div class="main">
 
   <!-- CARGA -->
-  <div class="card">
+  <div class="card" id="card-carga">
     <div class="section-title">📁 Carga de Archivos
       <button class="btn-toggle-files" onclick="toggleFiles(this)">▲ Ocultar</button>
     </div>
@@ -329,6 +335,12 @@ const USERS = {
   'carozzi': '3e7b54b01665b2b57500a3406340becd22868bb82f0bbb7a63ec34eeb0933dcb', // taurus2025
   'cliente': '2d09f8a068aaa884946fe9a0a013e01280ddd0b4a1f4843c68c970cfac8a4228'  // dashboard1
 };
+
+// Usuarios de SOLO LECTURA: ven las tablas pero NO pueden subir archivos,
+// limpiar datos, eliminar meses ni editar metas. Edita esta lista para
+// cambiar quién es solo-lectura.
+const READONLY_USERS = ['cliente'];
+let isReadOnly = false;
 
 async function sha256(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -590,6 +602,7 @@ async function doLogin() {
     localStorage.setItem('taurus_session', u);
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('tb-user').textContent = u.toUpperCase();
+    applyReadOnly(u);
     initApp();
   } else {
     document.getElementById('li-err').style.display = 'block';
@@ -601,7 +614,19 @@ function checkSession() {
   if (u && USERS[u]) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('tb-user').textContent = u.toUpperCase();
+    applyReadOnly(u);
     initApp();
+  }
+}
+
+// Activa el modo solo-lectura para el usuario indicado (oculta carga, limpieza
+// y edición de metas vía CSS, y bloquea las funciones por si se invocan a mano).
+function applyReadOnly(u) {
+  isReadOnly = READONLY_USERS.includes(u);
+  document.body.classList.toggle('readonly', isReadOnly);
+  const tb = document.getElementById('tb-user');
+  if (isReadOnly && tb && !tb.querySelector('.ro-badge')) {
+    tb.insertAdjacentHTML('beforeend', '<span class="ro-badge">SOLO LECTURA</span>');
   }
 }
 
@@ -634,6 +659,7 @@ function buildUploadGrid() {
 
 // ══════════════ HIST FILE HANDLING ══════════════
 function handleHist(input, cat) {
+  if (isReadOnly) return;
   const file = input.files[0];
   if (!file) return;
   showToast('⏳ Procesando histórico ' + file.name + '...');
@@ -711,6 +737,7 @@ function dedupKey(key) {
 }
 
 function handleFile(input, key) {
+  if (isReadOnly) return;
   const file = input.files[0];
   if (!file) return;
   showToast('⏳ Procesando ' + file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)...');
@@ -1048,6 +1075,7 @@ function formatMonth(m) {
 }
 
 async function deleteMonth(m) {
+  if (isReadOnly) return;
   if (!confirm(`¿Eliminar todos los datos del mes ${formatMonth(m)}?\nEsto incluye los 12 archivos (Seco + Congelados).`)) return;
   for (const cat of CATS) {
     for (const base of FILE_KEYS) {
@@ -1233,6 +1261,7 @@ function difCellPct(actual, meta) {
 }
 
 async function limpiarTodo() {
+  if (isReadOnly) return;
   if (!confirm('¿Limpiar todos los datos cargados?\nEsto elimina Seco + Congelados, meses, metas y planes.\nSe borrará también de la nube.')) return;
   // Clear localStorage
   Object.keys(localStorage)
@@ -1281,6 +1310,7 @@ function setCat(cat, btn) {
 
 
 function editMeta(span) {
+  if (isReadOnly) return;
   const mk = span.dataset.key;
   const isPct = span.dataset.ispct === 'true';
   const cur = METAS[mk] != null ? METAS[mk] : '';
@@ -1715,6 +1745,7 @@ function updateIndMeta(metaElId, cumplElId, metaKey, actual, isPesos) {
 }
 
 function editIndMeta(span) {
+  if (isReadOnly) return;
   const key = span.dataset.key;
   const isPesos = key === 'meta_ticket';
   const cur = METAS[key] != null ? METAS[key] : '';
