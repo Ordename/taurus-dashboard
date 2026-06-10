@@ -349,7 +349,7 @@ async function sha256(str) {
 
 // ══════════════ FILE TYPES ══════════════
 const CATS = ['seco','cong'];
-const FILE_KEYS = ['ventas','prot','bonos','trans','remv','rems','cob','plan'];
+const FILE_KEYS = ['ventas','prot','bonos','trans','remv','rems','plan'];
 const FILE_TYPES = [];
 CATS.forEach(cat => {
   FILE_KEYS.forEach(key => FILE_TYPES.push({ key: cat+'_'+key, base: key, cat }));
@@ -362,7 +362,6 @@ const FILE_LABELS = {
   trans:  'Costo Transporte',
   remv:   'Remuneración Vendedores',
   rems:   'Remuneración Supervisores',
-  cob:    'Cobertura (oficial)',
   plan:   'Plan / Metas',
   hist:   'Histórico 2025'
 };
@@ -404,7 +403,6 @@ const KEEP_COLS = {
   trans:  ['Codigo Vendedor','Mes','Monto'],
   remv:   ['Codigo Vendedor','Mes','Monto'],
   rems:   ['Codigo Vendedor','Mes','Monto'],
-  cob:    ['Codigo Vendedor','Mes','Monto'],
   plan:   null
 };
 
@@ -782,9 +780,12 @@ function handleFile(input, key) {
 
       const headers = (rawFull[headerIdx] || []).map(h => h ? String(h).trim() : '');
       const dataRows = rawFull.slice(headerIdx + 1).filter(r => r && r.some(c => c != null && c !== ''));
+      const baseKey = key.replace(/^(seco|cong)_/, '');
       const json = dataRows
         .map(r => { const o={}; headers.forEach((h,i)=>{ if(h) o[h]=r[i]??''; }); return o; })
         .filter(o => Object.values(o).some(v => v !== ''))
+        // Ventas: descartar filas sin vendedor (filas de totales del Excel)
+        .filter(o => baseKey !== 'ventas' || String(o['VENDEDOR']||'').trim() !== '')
         .map(row => trimRow(row, key));
 
       const month = detectMonth(json, key);
@@ -1180,7 +1181,6 @@ const FILE_COLS = {
   trans: { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
   remv:  { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
   rems:  { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
-  cob:   { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes' },
   plan:  { val:null,        date:null,               vend:null,              div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[] },
 };
 
@@ -1679,14 +1679,12 @@ function renderDashboard(filtered, totalRows) {
   document.getElementById('resumen-wrap').innerHTML = html;
 
   // ── Indicadores de Gestión — tabla por mes ──
-  // Cobertura: si hay archivo oficial cargado se usa ese número; si no, se
-  // calcula como clientes únicos desde ventas.
-  const hasCobFile = allRows('cob').length > 0;
+  // Cobertura: clientes únicos POR VENDEDOR (ENTIDAD+VENDEDOR) calculados desde
+  // ventas. Un cliente atendido por dos rutas/sucursales cuenta en cada una,
+  // igual que el conteo oficial del cliente (~1-2% de diferencia).
   const indRows = months.map(m => {
     const mRows = filtered.filter(r => rowMonth(r) === m);
-    const cob = hasCobFile
-      ? Math.round(sumFile('cob', mRows))
-      : new Set(mRows.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size;
+    const cob = new Set(mRows.map(r=>(r['ENTIDAD']||'')+'|'+(r['VENDEDOR']||''))).size;
     const trx = new Set(mRows.map(r=>(r['NUM_DOC']||'')+'|'+(r['EMISION']||''))).size;
     const mVenta = sumC(mRows,'VTAAPRECIO');
     const tkt = trx > 0 ? mVenta/trx*1000 : 0;
@@ -1695,11 +1693,9 @@ function renderDashboard(filtered, totalRows) {
     return { m, cob, trx, tkt, cobMeta, cobCls };
   });
 
-  // Totals — cobertura no es aditiva entre meses: con archivo oficial el total
-  // es el PROMEDIO mensual; calculada, son los clientes únicos del período.
-  const totCob = hasCobFile
-    ? Math.round(indRows.reduce((s,r)=>s+r.cob,0) / Math.max(1, indRows.length))
-    : (filtered.length ? new Set(filtered.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size : 0);
+  // Totals — la cobertura no es aditiva entre meses: el total es el PROMEDIO
+  // mensual, comparable con la meta mensual del plan.
+  const totCob = Math.round(indRows.reduce((s,r)=>s+r.cob,0) / Math.max(1, indRows.length));
   const metasMes = indRows.map(r=>r.cobMeta).filter(v=>v!=null);
   const metaCob = metasMes.length
     ? metasMes.reduce((s,v)=>s+v,0) / metasMes.length
@@ -1721,7 +1717,7 @@ function renderDashboard(filtered, totalRows) {
     </tr></thead>
     <tbody>
       <tr style="background:#FAF5FF">
-        <td style="font-weight:600">🏢 Cobertura <span style="font-size:10px;color:#999;font-weight:400">${hasCobFile?'oficial · total = promedio mensual':'clientes únicos'}</span></td>
+        <td style="font-weight:600">🏢 Cobertura <span style="font-size:10px;color:#999;font-weight:400">clientes por vendedor · total = promedio mensual</span></td>
         ${indRows.map(({cob,cobMeta,cobCls})=>`<td class="num col-msep ${cobCls}">${cob.toLocaleString('es-CL')}</td>`).join('')}
         ${showIndTotal?`<td class="num col-tot ${totCobCls}" style="font-weight:700">${totCob.toLocaleString('es-CL')}</td>`:''}
         <td class="num" style="color:#888">${metaCob!=null?Math.round(metaCob).toLocaleString('es-CL'):'—'}</td>
@@ -1859,8 +1855,22 @@ function renderDivision(filtered) {
     divMap[div].total += n(r['VTAAPRECIO']);
   });
 
+  // Exclusiones: MASCOTAS está descontinuada y 'Sin División' se oculta si va en 0
+  delete divMap['MASCOTAS'];
+  if (divMap['Sin División'] && divMap['Sin División'].total === 0) delete divMap['Sin División'];
+
   const secoEntries = Object.entries(divMap).filter(([,d])=>d.cat==='seco').sort((a,b)=>b[1].total-a[1].total);
   const congEntries = Object.entries(divMap).filter(([,d])=>d.cat==='cong').sort((a,b)=>b[1].total-a[1].total);
+
+  // Agrupaciones del reporte:
+  //   SECO  = CAROZZI (todas menos CASO) + CASO
+  //   CONG  = BRESLER (I/G/H) + SAN FRANCISCO (I/G/H) + total combinado por categoría
+  const ordC = d => /IMPULSIVO/.test(d) ? 0 : /GRANEL/.test(d) ? 1 : 2; // I, G, H(=OTROS)
+  const carozziE = secoEntries.filter(([d])=>d!=='CASO');
+  const casoE    = secoEntries.filter(([d])=>d==='CASO');
+  const breslerE = congEntries.filter(([d])=>d.startsWith('BRESLER')).sort((a,b)=>ordC(a[0])-ordC(b[0]));
+  const sanfcoE  = congEntries.filter(([d])=>d.startsWith('SAN FRANCISCO')).sort((a,b)=>ordC(a[0])-ordC(b[0]));
+  const otherCongE = congEntries.filter(([d])=>!d.startsWith('BRESLER')&&!d.startsWith('SAN FRANCISCO'));
 
   // Format helpers
   const numCell = (v, cls='') => `<td class="num ${cls}">${pesos(v)}</td>`;
@@ -1925,27 +1935,48 @@ function renderDivision(filtered) {
     </tr>`;
   };
 
-  // Render subtotal row
-  const renderSub = (entries, label) => {
-    const moCells = months.map(mo => {
-      const moKey = mo.slice(5,7);
-      const real = entries.reduce((s,[,d])=>s+(d.byMonth[moKey]||0),0);
-      const planV = entries.reduce((s,[div])=>s+(getPlanDivFiltered(div,[mo])||0),0)||null;
-      // AA: null if no entry has AA data
-      const aaVals = entries.map(([div,d])=>getAA(d.cat,div,moKey));
-      const aa = aaVals.some(v=>v!=null) ? aaVals.reduce((s,v)=>s+(v||0),0) : null;
-      return moCell(real, planV||null, aa);
-    }).join('');
+  // Celdas agregadas (suma de varias divisiones) — usadas por subtotales y combos
+  const aggMoCells = (entries) => months.map(mo => {
+    const moKey = mo.slice(5,7);
+    const real = entries.reduce((s,[,d])=>s+(d.byMonth[moKey]||0),0);
+    const planV = entries.reduce((s,[div])=>s+(getPlanDivFiltered(div,[mo])||0),0)||null;
+    const aaVals = entries.map(([div,d])=>getAA(d.cat,div,moKey));
+    const aa = aaVals.some(v=>v!=null) ? aaVals.reduce((s,v)=>s+(v||0),0) : null;
+    return moCell(real, planV||null, aa);
+  }).join('');
+  const aggTotalCells = (entries) => {
+    if (!showTotal) return '';
     const totReal = entries.reduce((s,[,d])=>s+d.total,0);
     const totPlan = entries.reduce((s,[div])=>s+(getPlanDivFiltered(div,months)||0),0)||null;
-    const totAaVals = months.map(mo=>entries.map(([div,d])=>getAA(d.cat,div,mo.slice(5,7))));
-    const totAA = totAaVals.flat().some(v=>v!=null) ? totAaVals.flat().reduce((s,v)=>s+(v||0),0) : null;
-    const totalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
-    return `<tr style="background:#1A0005;color:#FFF;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
-      <td style="letter-spacing:.04em">${label}</td>
-      ${moCells}${totalCells}
-    </tr>`;
+    const totAaVals = months.flatMap(mo=>entries.map(([div,d])=>getAA(d.cat,div,mo.slice(5,7))));
+    const totAA = totAaVals.some(v=>v!=null) ? totAaVals.reduce((s,v)=>s+(v||0),0) : null;
+    return moCell(totReal, totPlan, totAA, 'col-tot');
   };
+
+  // Subtotal oscuro (cierra cada categoría)
+  const renderSub = (entries, label) => `
+    <tr style="background:#1A0005;color:#FFF;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
+      <td style="letter-spacing:.04em">${label}</td>
+      ${aggMoCells(entries)}${aggTotalCells(entries)}
+    </tr>`;
+
+  // Total intermedio (TOTAL CAROZZI / BRESLER / SAN FRANCISCO)
+  const renderMid = (label, entries) => `
+    <tr style="background:#FBE9EB;color:#8B0012;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
+      <td style="letter-spacing:.04em">${label}</td>
+      ${aggMoCells(entries)}${aggTotalCells(entries)}
+    </tr>`;
+
+  // Fila combinada (categoría I/G/H sumando Bresler + San Francisco)
+  const renderCombo = (label, entries) => `
+    <tr>
+      <td style="padding-left:20px;font-weight:600;color:var(--text)">${label}</td>
+      ${aggMoCells(entries)}${aggTotalCells(entries)}
+    </tr>`;
+
+  // Etiqueta de grupo
+  const grpRow = (label) => `
+    <tr><td colspan="${totalCols}" style="background:#F7F7F7;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#555;padding:5px 16px">${label}</td></tr>`;
 
   // Grand total row
   const allEntries = [...secoEntries, ...congEntries];
@@ -1973,12 +2004,33 @@ function renderDivision(filtered) {
     <tbody>
     ${secoEntries.length ? `
       <tr><td colspan="${totalCols}" style="background:#FFF0F0;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8B0012;padding:6px 16px">🥫 SECO</td></tr>
-      ${secoEntries.map(([div,d])=>renderRow(div,d)).join('')}
+      ${carozziE.length ? `
+        ${grpRow('Carozzi')}
+        ${carozziE.map(([div,d])=>renderRow(div,d)).join('')}
+        ${renderMid('TOTAL CAROZZI', carozziE)}
+      ` : ''}
+      ${casoE.map(([div,d])=>renderRow(div,d)).join('')}
       ${renderSub(secoEntries,'SUBTOTAL SECO')}
     ` : ''}
     ${congEntries.length ? `
       <tr><td colspan="${totalCols}" style="background:#F0FBF5;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#0F6E56;padding:6px 16px">❄️ CONGELADOS</td></tr>
-      ${congEntries.map(([div,d])=>renderRow(div,d)).join('')}
+      ${breslerE.length ? `
+        ${grpRow('Bresler')}
+        ${breslerE.map(([div,d])=>renderRow(div,d)).join('')}
+        ${renderMid('TOTAL BRESLER', breslerE)}
+      ` : ''}
+      ${sanfcoE.length ? `
+        ${grpRow('San Francisco')}
+        ${sanfcoE.map(([div,d])=>renderRow(div,d)).join('')}
+        ${renderMid('TOTAL SAN FRANCISCO', sanfcoE)}
+      ` : ''}
+      ${otherCongE.map(([div,d])=>renderRow(div,d)).join('')}
+      ${(breslerE.length && sanfcoE.length) ? `
+        ${grpRow('Total Congelados · Bresler + San Francisco')}
+        ${renderCombo('IMPULSIVO', congEntries.filter(([d])=>/IMPULSIVO/.test(d)))}
+        ${renderCombo('GRANEL',    congEntries.filter(([d])=>/GRANEL/.test(d)))}
+        ${renderCombo('HOGAR',     congEntries.filter(([d])=>/OTROS/.test(d)))}
+      ` : ''}
       ${renderSub(congEntries,'SUBTOTAL CONGELADOS')}
     ` : ''}
     </tbody>
