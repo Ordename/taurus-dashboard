@@ -169,8 +169,8 @@ body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;curs
 .div-tbl th.gm{background:#5C0009;text-align:center}
 .div-tbl th.sub{background:#D9001E}
 .div-tbl td:first-child{font-weight:600;color:var(--red);font-size:13px}
-.div-tbl tr.tot td{background:#111;color:#FFF;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12px}
-.div-tbl tr.tot td:first-child{color:#FFF}
+.div-tbl tr.tot td{background:#EFCBD1;color:#5C0009;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12px;border-top:2px solid var(--red)}
+.div-tbl tr.tot td:first-child{color:#5C0009}
 
 /* EMPTY */
 .empty{text-align:center;padding:60px 20px;color:var(--muted)}
@@ -1953,9 +1953,9 @@ function renderDivision(filtered) {
     return moCell(totReal, totPlan, totAA, 'col-tot');
   };
 
-  // Subtotal oscuro (cierra cada categoría)
+  // Subtotal (cierra cada categoría) — fondo claro para que los números se lean bien
   const renderSub = (entries, label) => `
-    <tr style="background:#1A0005;color:#FFF;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
+    <tr style="background:#F6DFE3;color:#5C0009;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
       <td style="letter-spacing:.04em">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
