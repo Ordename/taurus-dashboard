@@ -63,7 +63,7 @@ body{font-family:'Inter',sans-serif;background:#F2F2F2;color:var(--text);min-hei
 .cat-badge{font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.08em}
 .cat-badge-seco{background:#EEF4FF;color:#1A4A8B}
 .cat-badge-cong{background:#E1F5EE;color:#0F6E56}
-.upload-row{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.upload-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
 .upload-divider{height:1px;background:var(--border);margin:6px 0}
 .btn-toggle-files{margin-left:auto;font-size:10px;font-weight:600;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer;letter-spacing:.04em;font-family:'Inter',sans-serif}
 .btn-toggle-files:hover{color:var(--text);border-color:#999}
@@ -349,7 +349,7 @@ async function sha256(str) {
 
 // ══════════════ FILE TYPES ══════════════
 const CATS = ['seco','cong'];
-const FILE_KEYS = ['ventas','prot','bonos','trans','remv','rems','plan'];
+const FILE_KEYS = ['ventas','prot','bonos','trans','remv','rems','cob','plan'];
 const FILE_TYPES = [];
 CATS.forEach(cat => {
   FILE_KEYS.forEach(key => FILE_TYPES.push({ key: cat+'_'+key, base: key, cat }));
@@ -362,6 +362,7 @@ const FILE_LABELS = {
   trans:  'Costo Transporte',
   remv:   'Remuneración Vendedores',
   rems:   'Remuneración Supervisores',
+  cob:    'Cobertura (oficial)',
   plan:   'Plan / Metas',
   hist:   'Histórico 2025'
 };
@@ -403,6 +404,7 @@ const KEEP_COLS = {
   trans:  ['Codigo Vendedor','Mes','Monto'],
   remv:   ['Codigo Vendedor','Mes','Monto'],
   rems:   ['Codigo Vendedor','Mes','Monto'],
+  cob:    ['Codigo Vendedor','Mes','Monto'],
   plan:   null
 };
 
@@ -813,12 +815,15 @@ function handleFile(input, key) {
 }
 
 // ══════════════ PLAN FILE PROCESSING ══════════════
+// Soporta archivos multi-mes: si existe columna 'Mes' (1..12), cada fila se
+// acumula en su propio mes y se guardan metas/plan POR MES. Antes todo el
+// archivo caía en un solo mes.
 function processPlanFile(raw, cat) {
   try {
     // Find header row — look for 'Vendedor' or 'VENDEDOR' column
     let headerIdx = -1;
     let vendCol = 1, totCol = -1, costoCol = -1, bonosCol = -1,
-        transCol = -1, remSCol = -1, remVCol = -1, cobCol = -1;
+        transCol = -1, remSCol = -1, remVCol = -1, cobCol = -1, mesCol = -1;
     let divCols = []; // [{name, idx}]
 
     for (let i = 0; i < Math.min(10, raw.length); i++) {
@@ -834,6 +839,7 @@ function processPlanFile(raw, cat) {
         remSCol  = r.findIndex(c => c && String(c).toUpperCase().includes('SUPERV'));
         remVCol  = r.findIndex(c => c && /REM/.test(String(c).toUpperCase()) && /VEND/.test(String(c).toUpperCase()));
         cobCol   = r.findIndex(c => c && String(c).toUpperCase().includes('COBERTURA'));
+        mesCol   = r.findIndex(c => c && String(c).trim().toUpperCase() === 'MES');
 
         // Division columns = all between Vendedor and TOTAL
         const endCol = totCol > 0 ? totCol : r.length;
@@ -849,17 +855,34 @@ function processPlanFile(raw, cat) {
     if (headerIdx < 0) { showToast('⚠️ Plan: no se encontró columna Vendedor'); return; }
     if (divCols.length === 0) { showToast('⚠️ Plan: no se encontraron columnas de división'); return; }
 
-    let planVentaTotal=0, planCostoTotal=0, planBonos=0, planTrans=0, planRemSup=0, planRemVend=0, planCobertura=0;
-    const planByDiv  = {};
-    const costoByDiv = {};
-    divCols.forEach(d => { planByDiv[d.name] = 0; costoByDiv[d.name] = 0; });
     const pfx = cat + '_';
+    const year = new Date().getFullYear();
+    // Mes de respaldo cuando el archivo no trae columna Mes
+    const fallbackMonth = detectMonth(raw.slice(headerIdx+1).map(r=>{
+      const obj={}; (raw[headerIdx]||[]).forEach((h,i)=>{ if(h) obj[String(h).trim()]=r[i]; }); return obj;
+    }).filter(o=>Object.values(o).some(v=>v!=null&&v!=='')), cat+'_plan');
+
+    // Acumuladores por mes
+    const M = {}; // mo -> {venta,costo,bonos,trans,remS,remV,cob, byDiv:{}, costoByDiv:{}, vend:{}}
+    const newMonth = () => {
+      const o = { venta:0,costo:0,bonos:0,trans:0,remS:0,remV:0,cob:0, byDiv:{}, costoByDiv:{}, vend:{} };
+      divCols.forEach(d => { o.byDiv[d.name]=0; o.costoByDiv[d.name]=0; });
+      return o;
+    };
 
     let rowsProcessed = 0;
     for (let i = headerIdx + 1; i < raw.length; i++) {
       const r = raw[i] || [];
       const vend = r[vendCol];
       if (!vend || !/^[A-Z]\d+$/i.test(String(vend).trim())) continue;
+
+      let mo = fallbackMonth;
+      if (mesCol >= 0) {
+        const m = parseInt(r[mesCol]);
+        if (m >= 1 && m <= 12) mo = year + '-' + String(m).padStart(2,'0');
+      }
+      if (!M[mo]) M[mo] = newMonth();
+      const acc = M[mo];
 
       const total = totCol   >= 0 ? Math.abs(Number(r[totCol]))   || 0 : 0;
       const costo = costoCol >= 0 ? Math.abs(Number(r[costoCol])) || 0 : 0;
@@ -870,34 +893,25 @@ function processPlanFile(raw, cat) {
       const cob   = cobCol   >= 0 ? Number(r[cobCol]) || 0 : 0;
 
       const vendKey = String(vend).trim();
-      planVentaTotal += total;
-      planCostoTotal += costo;
-      planBonos      += bonos;
-      planTrans      += trans;
-      planRemSup     += remS;
-      planRemVend    += remV;
-      planCobertura  += cob;
+      acc.venta += total; acc.costo += costo; acc.bonos += bonos;
+      acc.trans += trans; acc.remS  += remS;  acc.remV  += remV; acc.cob += cob;
 
-      // Save per-vendor breakdown
-      if (!PLAN_VEND[pfx + vendKey]) PLAN_VEND[pfx + vendKey] = { total:0, costo:0, bonos:0, trans:0, remS:0, remV:0, cob:0, divs:{} };
-      const pv = PLAN_VEND[pfx + vendKey];
+      if (!acc.vend[vendKey]) acc.vend[vendKey] = { total:0, costo:0, bonos:0, trans:0, remS:0, remV:0, cob:0, divs:{} };
+      const pv = acc.vend[vendKey];
       pv.total += total; pv.costo += costo; pv.bonos += bonos;
       pv.trans += trans; pv.remS  += remS;  pv.remV  += remV; pv.cob += cob;
 
-      // Sum each division
       let divTotal = 0;
       divCols.forEach(d => {
         const v = Number(r[d.idx]) || 0;
-        planByDiv[d.name]  += v;
-        if (!pv.divs[d.name]) pv.divs[d.name] = 0;
-        pv.divs[d.name] += v;
+        acc.byDiv[d.name] += v;
+        pv.divs[d.name] = (pv.divs[d.name] || 0) + v;
         divTotal += v;
       });
-      // Distribute cost proportionally
       if (divTotal > 0 && costo > 0) {
         divCols.forEach(d => {
           const v = Number(r[d.idx]) || 0;
-          costoByDiv[d.name] += costo * (v / divTotal);
+          acc.costoByDiv[d.name] += costo * (v / divTotal);
         });
       }
       rowsProcessed++;
@@ -905,47 +919,43 @@ function processPlanFile(raw, cat) {
 
     if (rowsProcessed === 0) { showToast('⚠️ Plan: no se encontraron filas de vendedores'); return; }
 
-    // Detect plan month
-    const planMonth = detectMonth(raw.slice(headerIdx+1).map(r=>{
-      const obj={}; (raw[headerIdx]||[]).forEach((h,i)=>{ if(h) obj[String(h).trim()]=r[i]; }); return obj;
-    }).filter(o=>Object.values(o).some(v=>v!=null&&v!=='')), cat+'_plan');
+    const monthsInFile = Object.keys(M).sort();
+    const METAKEYS = [['meta_venta_total','venta'],['meta_costo_venta','costo'],['meta_bonos','bonos'],
+                      ['meta_c_trans','trans'],['meta_remu_s','remS'],['meta_remu_v','remV'],['meta_cobertura','cob']];
 
-    // Save metas with month key AND without (for backward compat total)
-    const saveMetaKeys = [
-      ['meta_venta_total', planVentaTotal],
-      ['meta_costo_venta', planCostoTotal],
-      ['meta_bonos',       planBonos],
-      ['meta_c_trans',     planTrans],
-      ['meta_remu_s',      planRemSup],
-      ['meta_remu_v',      planRemVend],
-      ['meta_cobertura',   planCobertura],
-    ];
-    saveMetaKeys.forEach(([k, v]) => {
-      if (planMonth) METAS[pfx + planMonth + '_' + k] = Math.round(v); // per-month key
-      METAS[pfx + k] = Math.round(v); // legacy total key (overwritten each month upload)
-    });
-    saveMetas();
-
-    // Save PLAN_DIV per month
-    divCols.forEach(d => {
-      if (planMonth) {
-        PLAN_DIV[pfx + planMonth + '_pv_' + d.name] = Math.round(planByDiv[d.name]);
-        PLAN_DIV[pfx + planMonth + '_pc_' + d.name] = Math.round(costoByDiv[d.name]);
-      }
-      PLAN_DIV[pfx+'pv_' + d.name] = Math.round(planByDiv[d.name]);
-      PLAN_DIV[pfx+'pc_' + d.name] = Math.round(costoByDiv[d.name]);
-    });
-    savePlanDiv();
-
-    // Save PLAN_VEND per month
-    if (planMonth) {
-      Object.keys(PLAN_VEND).filter(k=>k.startsWith(pfx)&&!k.includes('_20')).forEach(k=>{
-        PLAN_VEND[pfx + planMonth + '_' + k.slice(pfx.length)] = PLAN_VEND[k];
+    // Por-mes
+    monthsInFile.forEach(mo => {
+      const acc = M[mo];
+      METAKEYS.forEach(([k, f]) => { METAS[pfx + mo + '_' + k] = Math.round(acc[f]); });
+      divCols.forEach(d => {
+        PLAN_DIV[pfx + mo + '_pv_' + d.name] = Math.round(acc.byDiv[d.name]);
+        PLAN_DIV[pfx + mo + '_pc_' + d.name] = Math.round(acc.costoByDiv[d.name]);
       });
-    }
-    savePlanVend();
+      Object.entries(acc.vend).forEach(([v, pv]) => { PLAN_VEND[pfx + mo + '_' + v] = pv; });
+    });
 
-    showToast(`📋 Plan cargado — ${rowsProcessed} vendedores · ${divCols.length} divisiones · metas actualizadas`);
+    // Legacy (sin mes) = suma de los meses del archivo
+    METAKEYS.forEach(([k, f]) => {
+      METAS[pfx + k] = Math.round(monthsInFile.reduce((s,mo)=>s+M[mo][f],0));
+    });
+    divCols.forEach(d => {
+      PLAN_DIV[pfx+'pv_' + d.name] = Math.round(monthsInFile.reduce((s,mo)=>s+M[mo].byDiv[d.name],0));
+      PLAN_DIV[pfx+'pc_' + d.name] = Math.round(monthsInFile.reduce((s,mo)=>s+M[mo].costoByDiv[d.name],0));
+    });
+    const allVends = [...new Set(monthsInFile.flatMap(mo=>Object.keys(M[mo].vend)))];
+    allVends.forEach(v => {
+      const agg = { total:0, costo:0, bonos:0, trans:0, remS:0, remV:0, cob:0, divs:{} };
+      monthsInFile.forEach(mo => {
+        const pv = M[mo].vend[v]; if (!pv) return;
+        agg.total+=pv.total; agg.costo+=pv.costo; agg.bonos+=pv.bonos;
+        agg.trans+=pv.trans; agg.remS+=pv.remS; agg.remV+=pv.remV; agg.cob+=pv.cob;
+        Object.entries(pv.divs).forEach(([d,val])=>{ agg.divs[d]=(agg.divs[d]||0)+val; });
+      });
+      PLAN_VEND[pfx + v] = agg;
+    });
+
+    saveMetas(); savePlanDiv(); savePlanVend();
+    showToast(`📋 Plan cargado — ${rowsProcessed} filas · ${monthsInFile.length} mes(es) · ${divCols.length} divisiones`);
   } catch(err) {
     showToast('❌ Error procesando plan: ' + err.message);
     console.error('processPlanFile error:', err);
@@ -1170,6 +1180,7 @@ const FILE_COLS = {
   trans: { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
   remv:  { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
   rems:  { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes', negate:true },
+  cob:   { val:'Monto',     date:null,               vend:'Codigo Vendedor', div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[], mesCol:'Mes' },
   plan:  { val:null,        date:null,               vend:null,              div:null,  fam:null,          doc:null,         tipo:null,          tipoFCV:[] },
 };
 
@@ -1668,20 +1679,31 @@ function renderDashboard(filtered, totalRows) {
   document.getElementById('resumen-wrap').innerHTML = html;
 
   // ── Indicadores de Gestión — tabla por mes ──
-  const metaCob = getMeta('meta_cobertura');
+  // Cobertura: si hay archivo oficial cargado se usa ese número; si no, se
+  // calcula como clientes únicos desde ventas.
+  const hasCobFile = allRows('cob').length > 0;
   const indRows = months.map(m => {
     const mRows = filtered.filter(r => rowMonth(r) === m);
-    const cob = new Set(mRows.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size;
+    const cob = hasCobFile
+      ? Math.round(sumFile('cob', mRows))
+      : new Set(mRows.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size;
     const trx = new Set(mRows.map(r=>(r['NUM_DOC']||'')+'|'+(r['EMISION']||''))).size;
     const mVenta = sumC(mRows,'VTAAPRECIO');
     const tkt = trx > 0 ? mVenta/trx*1000 : 0;
-    const cobMeta = metaCob != null ? metaCob / months.length : null;
+    const cobMeta = monthMetaRaw('meta_cobertura', m); // meta del mes; null si ese mes no tiene plan
     const cobCls = cobMeta ? (cob>=cobMeta?'pos':'neg') : '';
     return { m, cob, trx, tkt, cobMeta, cobCls };
   });
 
-  // Totals
-  const totCob = filtered.length ? new Set(filtered.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size : 0;
+  // Totals — cobertura no es aditiva entre meses: con archivo oficial el total
+  // es el PROMEDIO mensual; calculada, son los clientes únicos del período.
+  const totCob = hasCobFile
+    ? Math.round(indRows.reduce((s,r)=>s+r.cob,0) / Math.max(1, indRows.length))
+    : (filtered.length ? new Set(filtered.map(r=>(r['ENTIDAD']||'')+'|'+(r['SUENDO']||''))).size : 0);
+  const metasMes = indRows.map(r=>r.cobMeta).filter(v=>v!=null);
+  const metaCob = metasMes.length
+    ? metasMes.reduce((s,v)=>s+v,0) / metasMes.length
+    : getMeta('meta_cobertura');
   const totTrx = filtered.length ? new Set(filtered.map(r=>(r['NUM_DOC']||'')+'|'+(r['EMISION']||''))).size : 0;
   const totTkt = totTrx > 0 ? totalVenta/totTrx*1000 : 0;
   const totCobCls = metaCob ? (totCob>=metaCob?'pos':'neg') : '';
@@ -1699,7 +1721,7 @@ function renderDashboard(filtered, totalRows) {
     </tr></thead>
     <tbody>
       <tr style="background:#FAF5FF">
-        <td style="font-weight:600">🏢 Cobertura <span style="font-size:10px;color:#999;font-weight:400">clientes únicos</span></td>
+        <td style="font-weight:600">🏢 Cobertura <span style="font-size:10px;color:#999;font-weight:400">${hasCobFile?'oficial · total = promedio mensual':'clientes únicos'}</span></td>
         ${indRows.map(({cob,cobMeta,cobCls})=>`<td class="num col-msep ${cobCls}">${cob.toLocaleString('es-CL')}</td>`).join('')}
         ${showIndTotal?`<td class="num col-tot ${totCobCls}" style="font-weight:700">${totCob.toLocaleString('es-CL')}</td>`:''}
         <td class="num" style="color:#888">${metaCob!=null?Math.round(metaCob).toLocaleString('es-CL'):'—'}</td>
