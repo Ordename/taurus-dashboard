@@ -787,7 +787,21 @@ function handleFile(input, key) {
         .filter(o => baseKey !== 'ventas' || String(o['VENDEDOR']||'').trim() !== '')
         .map(row => trimRow(row, key));
 
-      const month = detectMonth(json, key);
+      let month = detectMonth(json, key);
+      // Ventas: criterio "cada archivo = su mes". El archivo de un mes puede traer
+      // facturas con fecha de otros meses (refacturas); se asigna TODO al mes
+      // dominante del archivo y se fija EMISION a ese mes, para que cuadre con el
+      // cierre que entrega el cliente y no se crucen meses entre archivos.
+      if (baseKey === 'ventas' && json.length) {
+        const cnt = {};
+        json.forEach(r => { const m = rowMonth(r); if (m) cnt[m] = (cnt[m]||0) + 1; });
+        const dom = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+        if (dom) {
+          month = dom;
+          const iso = dom + '-01T00:00:00.000Z';
+          json.forEach(r => { r['EMISION'] = iso; });
+        }
+      }
       if (!DB[key]) DB[key] = {};
       DB[key][month] = json;
       dedupKey(key); // evita duplicados si se re-sube un archivo o archivos que se solapan
