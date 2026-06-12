@@ -1855,8 +1855,7 @@ function renderDivision(filtered) {
     divMap[div].total += n(r['VTAAPRECIO']);
   });
 
-  // Exclusiones: MASCOTAS está descontinuada y 'Sin División' se oculta si va en 0
-  delete divMap['MASCOTAS'];
+  // Exclusión: 'Sin División' se oculta si va en 0
   if (divMap['Sin División'] && divMap['Sin División'].total === 0) delete divMap['Sin División'];
 
   const secoEntries = Object.entries(divMap).filter(([,d])=>d.cat==='seco').sort((a,b)=>b[1].total-a[1].total);
