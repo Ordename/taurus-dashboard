@@ -168,9 +168,9 @@ body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;curs
 .div-tbl th.gc{background:#8B0012;text-align:center}
 .div-tbl th.gm{background:#5C0009;text-align:center}
 .div-tbl th.sub{background:#D9001E}
-.div-tbl td:first-child{font-weight:600;color:var(--red);font-size:13px}
-.div-tbl tr.tot td{background:#DEDEDE;color:#111;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12px;border-top:2px solid #555}
-.div-tbl tr.tot td:first-child{color:#111}
+.div-tbl td:first-child{font-weight:600;color:#1A1A1A;font-size:13px}
+.div-tbl tr.tot td{background:#E2E4E7;color:#111;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12.5px;border-top:3px double #111;border-bottom:3px double #111}
+.div-tbl tr.tot td:first-child{color:#111;font-family:'Inter',sans-serif;font-size:12px;font-weight:800;letter-spacing:.05em}
 
 /* EMPTY */
 .empty{text-align:center;padding:60px 20px;color:var(--muted)}
@@ -1909,9 +1909,9 @@ function renderDivision(filtered) {
   // Build a single month's cells: AA | Meta | Real | %Crec | %Cumpl
   // sep = clase de separador en la primera celda del bloque ('col-msep' mes, 'col-tot' total)
   const moCell = (real, planV, aa, sep='col-msep') => {
-    const aaCell = hasAA ? `<td class="num ${sep}" style="color:#888">${aa!=null?pesos(aa):'—'}</td>` : '';
-    const metaCell = planV!=null ? `<td class="num${hasAA?'':' '+sep}" style="color:#888">${pesos(planV)}</td>` : `<td class="num${hasAA?'':' '+sep}" style="color:#BBB">—</td>`;
-    const realCell = numCell(real);
+    const aaCell = hasAA ? `<td class="num ${sep}" style="color:#5F6368">${aa!=null?pesos(aa):'—'}</td>` : '';
+    const metaCell = planV!=null ? `<td class="num${hasAA?'':' '+sep}" style="color:#5F6368">${pesos(planV)}</td>` : `<td class="num${hasAA?'':' '+sep}" style="color:#9AA0A6">—</td>`;
+    const realCell = `<td class="num" style="font-weight:600">${pesos(real)}</td>`;
     const crecC = hasAA ? crecCell(real, aa) : '';
     const cumplC = cumplCell(real, planV);
     return aaCell + metaCell + realCell + crecC + cumplC;
@@ -1926,7 +1926,7 @@ function renderDivision(filtered) {
     const totAA = totAaVals.some(v=>v!=null) ? totAaVals.reduce((s,v)=>s+(v||0),0) : null;
     const totalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
     return `<tr>
-      <td style="${indent?'padding-left:20px':''}font-weight:600;color:var(--red)">${div}</td>
+      <td style="${indent?'padding-left:24px;':''}font-weight:600;color:#1A1A1A">${div}</td>
       ${months.map(mo=>{
         const moKey=mo.slice(5,7);
         return moCell(d.byMonth[moKey]||0, getPlanDivFiltered(div,[mo]), getAA(cat,div,moKey));
@@ -1952,31 +1952,36 @@ function renderDivision(filtered) {
     return moCell(totReal, totPlan, totAA, 'col-tot');
   };
 
-  // Subtotal (cierra cada categoría) — gris neutro: el rojo se reserva para
-  // variaciones negativas, no para filas de totales
+  // Jerarquía visual (estilo informe financiero):
+  //   etiqueta de grupo  → tipográfica, sin fondo
+  //   total de marca     → gris tenue, borde fino
+  //   subtotal categoría → gris medio, borde grueso
+  //   TOTAL GENERAL      → doble línea contable (CSS tr.tot)
+
+  // Subtotal de categoría (SUBTOTAL SECO / CONGELADOS)
   const renderSub = (entries, label) => `
-    <tr style="background:#E9E9E9;color:#222;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
-      <td style="letter-spacing:.04em;color:#222">${label}</td>
+    <tr style="background:#ECEDEF;border-top:2px solid #8A8F98;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700">
+      <td style="letter-spacing:.05em;color:#111;font-family:'Inter',sans-serif;font-size:11.5px;font-weight:800">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
   // Total intermedio (TOTAL CAROZZI / BRESLER / SAN FRANCISCO)
   const renderMid = (label, entries) => `
-    <tr style="background:#F4F4F4;color:#333;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:11px">
-      <td style="letter-spacing:.04em;color:#333">${label}</td>
+    <tr style="background:#F7F7F8;border-top:1px solid #D8DBDE;font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600">
+      <td style="letter-spacing:.04em;color:#444;font-family:'Inter',sans-serif;font-size:10.5px;font-weight:700">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
   // Fila combinada (categoría I/G/H sumando Bresler + San Francisco)
   const renderCombo = (label, entries) => `
     <tr>
-      <td style="padding-left:20px;font-weight:600;color:var(--text)">${label}</td>
+      <td style="padding-left:24px;font-weight:600;color:#1A1A1A">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
-  // Etiqueta de grupo
+  // Etiqueta de grupo — divisor tipográfico, sin fondo
   const grpRow = (label) => `
-    <tr><td colspan="${totalCols}" style="background:#F7F7F7;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#555;padding:5px 16px">${label}</td></tr>`;
+    <tr><td colspan="${totalCols}" style="background:#FFF;font-size:9.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#98A0A8;padding:10px 16px 4px;border-bottom:1px solid #EFEFEF">${label}</td></tr>`;
 
   // Grand total row
   const allEntries = [...secoEntries, ...congEntries];
@@ -2003,7 +2008,7 @@ function renderDivision(filtered) {
     </thead>
     <tbody>
     ${secoEntries.length ? `
-      <tr><td colspan="${totalCols}" style="background:#FFF0F0;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8B0012;padding:6px 16px">🥫 SECO</td></tr>
+      <tr><td colspan="${totalCols}" style="background:#8B0012;font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:#FFF;padding:8px 16px">Seco</td></tr>
       ${carozziE.length ? `
         ${grpRow('Carozzi')}
         ${carozziE.map(([div,d])=>renderRow(div,d)).join('')}
@@ -2013,7 +2018,7 @@ function renderDivision(filtered) {
       ${renderSub(secoEntries,'SUBTOTAL SECO')}
     ` : ''}
     ${congEntries.length ? `
-      <tr><td colspan="${totalCols}" style="background:#F0FBF5;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#0F6E56;padding:6px 16px">❄️ CONGELADOS</td></tr>
+      <tr><td colspan="${totalCols}" style="background:#0E4F66;font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:#FFF;padding:8px 16px">Congelados</td></tr>
       ${breslerE.length ? `
         ${grpRow('Bresler')}
         ${breslerE.map(([div,d])=>renderRow(div,d)).join('')}
