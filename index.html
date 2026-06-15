@@ -168,7 +168,14 @@ body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;curs
 .div-tbl th.gc{background:#8B0012;text-align:center}
 .div-tbl th.gm{background:#5C0009;text-align:center}
 .div-tbl th.sub{background:#D9001E}
-.div-tbl td:first-child{font-weight:600;color:#1A1A1A;font-size:13px}
+.div-tbl td:first-child{font-weight:600;color:#1A1A1A;font-size:12.5px}
+/* Más compacto: menos alto de fila y fuente algo menor */
+.div-tbl td,.div-tbl th{padding:3px 10px}
+.div-tbl .num,.div-tbl .pct{font-size:12px}
+/* Primera columna (División) fija al hacer scroll horizontal */
+.div-tbl td:first-child,.div-tbl th:first-child{position:sticky;left:0}
+.div-tbl tbody td:first-child{z-index:2}
+.div-tbl thead th:first-child{z-index:3}
 .div-tbl tr.tot td{background:#E2E4E7;color:#111;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12.5px;border-top:3px double #111;border-bottom:3px double #111}
 .div-tbl tr.tot td:first-child{color:#111;font-family:'Inter',sans-serif;font-size:12px;font-weight:800;letter-spacing:.05em}
 
@@ -1939,7 +1946,7 @@ function renderDivision(filtered) {
     const totAA = totAaVals.some(v=>v!=null) ? totAaVals.reduce((s,v)=>s+(v||0),0) : null;
     const totalCells = showTotal ? moCell(totReal, totPlan, totAA, 'col-tot') : '';
     return `<tr>
-      <td style="${indent?'padding-left:24px;':''}font-weight:600;color:#1A1A1A">${div}</td>
+      <td style="${indent?'padding-left:24px;':''}font-weight:600;color:#1A1A1A;background:#fff">${div}</td>
       ${months.map(mo=>{
         const moKey=mo.slice(5,7);
         return moCell(d.byMonth[moKey]||0, getPlanDivFiltered(div,[mo]), getAA(cat,div,moKey));
@@ -1974,21 +1981,21 @@ function renderDivision(filtered) {
   // Subtotal de categoría (SUBTOTAL SECO / CONGELADOS)
   const renderSub = (entries, label) => `
     <tr style="background:#ECEDEF;border-top:2px solid #8A8F98;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700">
-      <td style="letter-spacing:.05em;color:#111;font-family:'Inter',sans-serif;font-size:11.5px;font-weight:800">${label}</td>
+      <td style="letter-spacing:.05em;color:#111;font-family:'Inter',sans-serif;font-size:11.5px;font-weight:800;background:#ECEDEF">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
   // Total intermedio (TOTAL CAROZZI / BRESLER / SAN FRANCISCO)
   const renderMid = (label, entries) => `
     <tr style="background:#F7F7F8;border-top:1px solid #D8DBDE;font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600">
-      <td style="letter-spacing:.04em;color:#444;font-family:'Inter',sans-serif;font-size:10.5px;font-weight:700">${label}</td>
+      <td style="letter-spacing:.04em;color:#444;font-family:'Inter',sans-serif;font-size:10.5px;font-weight:700;background:#F7F7F8">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
   // Fila combinada (categoría I/G/H sumando Bresler + San Francisco)
   const renderCombo = (label, entries) => `
     <tr>
-      <td style="padding-left:24px;font-weight:600;color:#1A1A1A">${label}</td>
+      <td style="padding-left:24px;font-weight:600;color:#1A1A1A;background:#fff">${label}</td>
       ${aggMoCells(entries)}${aggTotalCells(entries)}
     </tr>`;
 
