@@ -201,7 +201,7 @@ body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;curs
     <div class="login-logo">CAROZZI</div>
     <div class="login-brand">TAURUS</div>
     <div class="login-sub">Canal Distribución · Dashboard 2026</div>
-    <div class="lf"><label>Usuario</label><input type="text" id="li-user" placeholder="usuario" autocomplete="username"></div>
+    <div class="lf"><label>Email</label><input type="email" id="li-user" placeholder="tu@correo.cl" autocomplete="username"></div>
     <div class="lf"><label>Contraseña</label><input type="password" id="li-pass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="login-btn" onclick="doLogin()">Ingresar</button>
     <div class="login-err" id="li-err">Usuario o contraseña incorrectos</div>
@@ -330,28 +330,12 @@ body.readonly .meta-display,body.readonly .ind-meta-val{pointer-events:none;curs
 <div class="toast" id="toast"></div>
 
 <script>
-// ══════════════ USERS ══════════════
-// Las contraseñas se guardan como hash SHA-256 (no en texto plano).
-// Para cambiar/agregar usuarios, genera el hash con:
-//   printf "%s" "tu_password" | shasum -a 256
-// NOTA: esto evita que la contraseña sea visible en el código fuente,
-// pero NO es seguridad real (el chequeo sigue siendo del lado del cliente).
-// La protección real de los datos depende de las políticas RLS en Supabase.
-const USERS = {
-  'admin':   'e6e9fb40576f7818fbe74292f5ecd12fe1d2fa7dfebb02ace57499c36a68978e', // carozzi2025
-  'cliente': '2d09f8a068aaa884946fe9a0a013e01280ddd0b4a1f4843c68c970cfac8a4228'  // dashboard1
-};
-
-// Usuarios de SOLO LECTURA: ven las tablas pero NO pueden subir archivos,
-// limpiar datos, eliminar meses ni editar metas. Edita esta lista para
-// cambiar quién es solo-lectura.
-const READONLY_USERS = ['cliente'];
+// ══════════════ AUTENTICACIÓN ══════════════
+// Login real con Supabase Auth (email+contraseña, validado en el servidor).
+// El acceso a los datos está protegido por RLS: sin sesión válida la API no
+// devuelve nada. Solo ADMIN_EMAIL puede escribir/borrar; el resto, solo lectura.
+const ADMIN_EMAIL = 'ncastro@ordename.cl';
 let isReadOnly = false;
-
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 // ══════════════ FILE TYPES ══════════════
 const CATS = ['seco','cong'];
@@ -444,11 +428,77 @@ function trimRow(row, key) {
 const SUPA_URL = 'https://qxmihrzncyfcggsafzef.supabase.co';
 const SUPA_KEY = 'sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4';
 
+// ── Sesión (token JWT del usuario autenticado) ──
+let SESSION = null; // { access_token, refresh_token, expires_at, email }
+
+function loadSession() {
+  try { SESSION = JSON.parse(localStorage.getItem('taurus_auth')); } catch { SESSION = null; }
+  return SESSION;
+}
+function storeSession(s) {
+  SESSION = s;
+  if (s) localStorage.setItem('taurus_auth', JSON.stringify(s));
+  else   localStorage.removeItem('taurus_auth');
+}
+function normSession(d, fallbackEmail) {
+  return {
+    access_token: d.access_token, refresh_token: d.refresh_token,
+    expires_at: d.expires_at || (Math.floor(Date.now()/1000) + (d.expires_in || 3600)),
+    email: (d.user && d.user.email) || fallbackEmail
+  };
+}
+
+async function authLogin(email, password) {
+  try {
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.access_token ? normSession(d, email) : null;
+  } catch { return null; }
+}
+
+async function authRefresh() {
+  if (!SESSION || !SESSION.refresh_token) return false;
+  try {
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST', headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: SESSION.refresh_token })
+    });
+    if (!r.ok) return false;
+    const d = await r.json();
+    if (!d.access_token) return false;
+    storeSession(normSession(d, SESSION.email));
+    return true;
+  } catch { return false; }
+}
+
+// Asegura un token válido (refresca si está por expirar). true si hay sesión.
+async function ensureSession() {
+  if (!SESSION) loadSession();
+  if (!SESSION) return false;
+  const now = Math.floor(Date.now()/1000);
+  if (SESSION.expires_at && SESSION.expires_at - now > 60) return true;
+  return await authRefresh();
+}
+
+// fetch a la API con el token del usuario; refresca y reintenta una vez si expira
+async function supaFetch(path, opts={}) {
+  const hdr = Object.assign({ 'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + (SESSION ? SESSION.access_token : SUPA_KEY) }, opts.headers || {});
+  let r = await fetch(`${SUPA_URL}${path}`, Object.assign({}, opts, { headers: hdr }));
+  if (r.status === 401 && await authRefresh()) {
+    hdr['Authorization'] = 'Bearer ' + SESSION.access_token;
+    r = await fetch(`${SUPA_URL}${path}`, Object.assign({}, opts, { headers: hdr }));
+  }
+  return r;
+}
+
 async function supaGet(key) {
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/taurus_data?key=eq.${encodeURIComponent(key)}&select=value`, {
-      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
-    });
+    const r = await supaFetch(`/rest/v1/taurus_data?key=eq.${encodeURIComponent(key)}&select=value`);
     const data = await r.json();
     return data && data[0] ? data[0].value : null;
   } catch { return null; }
@@ -456,12 +506,9 @@ async function supaGet(key) {
 
 async function supaSet(key, value) {
   try {
-    await fetch(`${SUPA_URL}/rest/v1/taurus_data?on_conflict=key`, {
+    await supaFetch(`/rest/v1/taurus_data?on_conflict=key`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal'
-      },
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
     });
   } catch(e) { console.warn('supaSet error', key, e.message); }
@@ -599,36 +646,44 @@ function savePlanVend(){
   } catch(_) {}
 }
 
-// ══════════════ LOGIN ══════════════
+// ══════════════ LOGIN (Supabase Auth) ══════════════
 async function doLogin() {
-  const u = document.getElementById('li-user').value.trim().toLowerCase();
-  const p = document.getElementById('li-pass').value;
-  const ph = await sha256(p);
-  if (USERS[u] && USERS[u] === ph) {
-    localStorage.setItem('taurus_session', u);
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('tb-user').textContent = u.toUpperCase();
-    applyReadOnly(u);
-    initApp();
-  } else {
-    document.getElementById('li-err').style.display = 'block';
-  }
-}
-function doLogout() { localStorage.removeItem('taurus_session'); location.reload(); }
-function checkSession() {
-  const u = localStorage.getItem('taurus_session');
-  if (u && USERS[u]) {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('tb-user').textContent = u.toUpperCase();
-    applyReadOnly(u);
-    initApp();
-  }
+  const email = document.getElementById('li-user').value.trim();
+  const pass  = document.getElementById('li-pass').value;
+  const btn = document.querySelector('.login-btn');
+  document.getElementById('li-err').style.display = 'none';
+  if (btn) { btn.disabled = true; btn.textContent = 'Ingresando...'; }
+  const s = await authLogin(email, pass);
+  if (btn) { btn.disabled = false; btn.textContent = 'Ingresar'; }
+  if (s) { storeSession(s); enterApp(); }
+  else   { document.getElementById('li-err').style.display = 'block'; }
 }
 
-// Activa el modo solo-lectura para el usuario indicado (oculta carga, limpieza
-// y edición de metas vía CSS, y bloquea las funciones por si se invocan a mano).
-function applyReadOnly(u) {
-  isReadOnly = READONLY_USERS.includes(u);
+async function doLogout() {
+  try {
+    if (SESSION) await fetch(`${SUPA_URL}/auth/v1/logout`, {
+      method: 'POST', headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SESSION.access_token }
+    });
+  } catch(_) {}
+  storeSession(null);
+  location.reload();
+}
+
+function enterApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('tb-user').textContent = (SESSION.email || '').toUpperCase();
+  applyReadOnly(SESSION.email);
+  initApp();
+}
+
+async function checkSession() {
+  if (await ensureSession()) enterApp();
+}
+
+// Solo el admin escribe; cualquier otro usuario es de SOLO LECTURA (oculta carga,
+// limpieza y edición vía CSS, y se bloquean las funciones por si se invocan a mano).
+function applyReadOnly(email) {
+  isReadOnly = String(email||'').toLowerCase() !== ADMIN_EMAIL.toLowerCase();
   document.body.classList.toggle('readonly', isReadOnly);
   const tb = document.getElementById('tb-user');
   if (isReadOnly && tb && !tb.querySelector('.ro-badge')) {
@@ -1294,17 +1349,14 @@ function difCellPct(actual, meta) {
 async function limpiarTodo() {
   if (isReadOnly) return;
   if (!confirm('¿Limpiar todos los datos cargados?\nEsto elimina Seco + Congelados, meses, metas y planes.\nSe borrará también de la nube.')) return;
-  // Clear localStorage
+  // Clear localStorage (conserva la sesión 'taurus_auth' para no desloguear)
   Object.keys(localStorage)
-    .filter(k => k.startsWith('taurus_') && k !== 'taurus_session')
+    .filter(k => k.startsWith('taurus_') && k !== 'taurus_auth')
     .forEach(k => localStorage.removeItem(k));
   // Clear Supabase — solo las filas de esta app (clave que empieza con 'taurus_'),
-  // nunca toda la tabla.
+  // nunca toda la tabla. Usa el token del usuario (RLS exige admin para borrar).
   try {
-    await fetch(`${SUPA_URL}/rest/v1/taurus_data?key=like.taurus_*`, {
-      method: 'DELETE',
-      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
-    });
+    await supaFetch(`/rest/v1/taurus_data?key=like.taurus_*`, { method: 'DELETE' });
   } catch(_) {}
   showToast('🗑 Datos eliminados — recargando...');
   setTimeout(() => location.reload(), 800);
