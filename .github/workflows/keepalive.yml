@@ -1,21 +1,42 @@
 name: Supabase keepalive
 
 # Mantiene "despierto" el proyecto gratuito de Supabase (se pausa tras ~7 días
-# de inactividad). Hace una consulta mínima cada 3 días desde la nube de GitHub.
+# de inactividad). Tras blindar la seguridad (RLS), un ping anónimo ya no cuenta
+# como actividad, así que este job INICIA SESIÓN con un usuario dedicado y lee
+# datos reales cada día — eso sí cuenta como uso.
+#
+# Requiere 2 secrets en el repo (Settings → Secrets and variables → Actions):
+#   KEEPALIVE_EMAIL     correo del usuario dedicado de keepalive
+#   KEEPALIVE_PASSWORD  su contraseña
 on:
   schedule:
-    - cron: '0 12 */3 * *'   # cada 3 días, 12:00 UTC
-  workflow_dispatch:          # permite ejecutarlo a mano desde la pestaña Actions
+    - cron: '0 12 * * *'   # todos los días, 12:00 UTC
+  workflow_dispatch:        # permite ejecutarlo a mano desde la pestaña Actions
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    env:
+      SUPA_URL: https://qxmihrzncyfcggsafzef.supabase.co
+      SUPA_KEY: sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4
+      KA_EMAIL: ${{ secrets.KEEPALIVE_EMAIL }}
+      KA_PASS:  ${{ secrets.KEEPALIVE_PASSWORD }}
     steps:
-      - name: Ping Supabase REST
+      - name: Login autenticado + lectura real
         run: |
+          if [ -z "$KA_EMAIL" ] || [ -z "$KA_PASS" ]; then
+            echo "Faltan los secrets KEEPALIVE_EMAIL / KEEPALIVE_PASSWORD"; exit 1
+          fi
+          # 1) Login → token JWT (esto ya golpea Auth + DB)
+          TOKEN=$(curl -s "$SUPA_URL/auth/v1/token?grant_type=password" \
+            -H "apikey: $SUPA_KEY" -H "Content-Type: application/json" \
+            -d "{\"email\":\"$KA_EMAIL\",\"password\":\"$KA_PASS\"}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+          if [ -z "$TOKEN" ]; then echo "Login falló (revisa credenciales)"; exit 1; fi
+          echo "Login OK"
+          # 2) Lectura autenticada de datos reales (actividad que sí cuenta)
           code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://qxmihrzncyfcggsafzef.supabase.co/rest/v1/taurus_data?select=key&limit=1" \
-            -H "apikey: sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4" \
-            -H "Authorization: Bearer sb_publishable_IKu2AxWcuMfHK_ELDyVqFQ_ExyR1Ig4")
-          echo "HTTP $code"
+            "$SUPA_URL/rest/v1/taurus_data?select=key&limit=1" \
+            -H "apikey: $SUPA_KEY" -H "Authorization: Bearer $TOKEN")
+          echo "Lectura autenticada HTTP $code"
           test "$code" = "200"
